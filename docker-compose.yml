@@ -2,9 +2,6 @@ version: "3"
 services:
   app:
     network_mode: 'bridge'
-    extends:
-      file: myapp.base.yml
-      service: myapp
     links:
       - kafka
       - spark

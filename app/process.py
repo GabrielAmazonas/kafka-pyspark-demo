@@ -6,16 +6,15 @@ spark-submit \
       --packages \
 
 """
+from __future__ import print_function
+
 import os
+import re
 import sys
 import json
 import argparse
 
 from pyspark.sql import SparkSession
-from pyspark.sql import Window
-from pyspark.sql import functions as F
-from pyspark.sql.types import *
-from pyspark import SparkContext
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
 
@@ -34,7 +33,7 @@ def create_parser():
     return parser
 
 
-def create_session():
+def create_context():
     spark = (SparkSession
              .builder
              .master('local[2]')
@@ -44,10 +43,11 @@ def create_session():
              .enableHiveSupport()
              .getOrCreate())
 
-    return spark
+    ssc = StreamingContext(spark.sparkContext, BATCH_DURATION)
+    return ssc
 
 
-def main(spark_session):
+def main():
     pass
 
 
@@ -57,15 +57,24 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print('Args: ', args)
 
-    spark = create_session()
-    ssc = StreamingContext(spark.sparkContext, BATCH_DURATION)
+    ssc = create_context()
+
+    ssc = StreamingContext.getOrCreate('/tmp/%s' % APP_NAME,
+                                       lambda: create_context())
+
     kafka_stream = KafkaUtils.createStream(ssc,
                                            'localhost:2181',
                                            'raw-event-streaming-consumer',
-                                           {'pageviews': 1})
+                                           {'twitter': 1})
+
+    # lambda v: json.loads(v[1])
     parsed = kafka_stream.map(lambda k, v: json.loads(v))
 
-    main(spark)
+    # Count number of tweets in the batch
+    count_this_batch = kafka_stream.count().map(lambda x:
+                                                ('Tweets this batch: %s' % x))
+
+    main()
 
     ssc.start()
-    ssc.awaitTermination()
+    ssc.awaitTermination(timeout=180)

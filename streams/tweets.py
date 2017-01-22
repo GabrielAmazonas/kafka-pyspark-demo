@@ -5,16 +5,17 @@ import os
 import json
 
 import tweepy
+from confluent_kafka import Producer
 
-consumer_key = os.environ['TWITTER_API_CONSUMER_KEY']
-consumer_secret = os.environ['TWITTER_API_CONSUMER_SECRET']
-access_token = os.environ['TWITTER_API_ACCESS_TOKEN']
-access_token_secret = os.environ['TWITTER_API_ACCESS_TOKEN_SECRET']
+consumer_key = os.environ['TWITTER_CONSUMER_KEY']
+consumer_secret = os.environ['TWITTER_CONSUMER_SECRET']
+access_token = os.environ['TWITTER_ACCESS_TOKEN']
+access_token_secret = os.environ['TWITTER_ACCESS_TOKEN_SECRET']
 
 LIMIT = 100
 
 
-def initialize():
+def main():
     auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
     auth.set_access_token(access_token, access_token_secret)
     api = tweepy.API(auth)
@@ -27,18 +28,18 @@ def initialize():
 class TwitterStreamListener(tweepy.StreamListener):
     def __init__(self):
         super(TwitterStreamListener, self).__init__()
-        self.producer = KafkaProducer(bootstrap_servers='docker:9092',
-                                      value_serializer=lambda v: json.dumps(v))
+        self.producer = Producer({'bootstrap.servers': 'docker:9092'})
+        # value_serializer=lambda v: json.dumps(v)
         self.count = 0
         self.tweets = []
 
     def on_data(self, data):
         tweet_dict = json.loads(data)
-        self.producer.send('twitter', tweet_dict['text'])
+        self.producer.produce('twitter', tweet_dict['text'].encode('utf-8'))
         self.producer.flush()
         print(tweet_dict)
         self.count += + 1
-        return self.count < LIMIT
+        return self.count <= LIMIT
 
     def on_error(self, status_code):
         if status_code == 420:
@@ -46,4 +47,4 @@ class TwitterStreamListener(tweepy.StreamListener):
 
 
 if __name__ == '__main__':
-    pass
+    main()

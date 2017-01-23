@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function
 
-import os
 import json
+import os
 
 import tweepy
 from confluent_kafka import Producer
@@ -20,8 +20,8 @@ def main():
     auth.set_access_token(access_token, access_token_secret)
     api = tweepy.API(auth)
 
-    stream = TwitterStreamListener()
-    twitter_stream = tweepy.Stream(auth=api.auth, listener=stream)
+    listener = TwitterStreamListener()
+    twitter_stream = tweepy.Stream(auth=api.auth, listener=listener)
     twitter_stream.filter(track=['python'], languages=['en'], async=True)
 
 
@@ -29,7 +29,6 @@ class TwitterStreamListener(tweepy.StreamListener):
     def __init__(self):
         super(TwitterStreamListener, self).__init__()
         self.producer = Producer({'bootstrap.servers': 'docker:9092'})
-        # value_serializer=lambda v: json.dumps(v)
         self.count = 0
         self.tweets = []
 

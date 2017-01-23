@@ -1,25 +1,14 @@
 version: "3"
+
 services:
-  app:
-    network_mode: 'bridge'
-    links:
-      - kafka
-      - spark
-    environment:
-      TWITTER_CONSUMER_KEY: '***'
-      TWITTER_CONSUMER_SECRET: '***'
-      TWITTER_ACCESS_TOKEN: '***'
-      TWITTER_ACCESS_TOKEN_SECRET: '***'
-  web:
-    image: nginx:latest
-    links:
-      - kafka
+
   zookeeper:
     image: confluentinc/cp-zookeeper:latest
     network_mode: host
     environment:
       ZOOKEEPER_CLIENT_PORT: 32181
       ZOOKEEPER_TICK_TIME: 2000
+
   kafka:
     image: confluentinc/cp-kafka:latest
     network_mode: host
@@ -29,9 +18,12 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: localhost:32181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:29092
+    # command: kafka-topics --create --topic twitter --partitions 1 --replication-factor 1 --if-not-exists --zookeeper localhost:32181
+
   spark:
     image: jupyter/pyspark-notebook
+    network_mode: host
     links:
      - kafka
-    expose:
+    ports:
       - "8888:8888"

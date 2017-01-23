@@ -3,23 +3,22 @@
 """Spark App.
 
 spark-submit \
-      --packages \
+  --packages org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2 \
 
 """
 from __future__ import print_function
 
-import os
-import re
-import sys
-import json
 import argparse
+import json
+import os
+import sys
 
 from pyspark.sql import SparkSession
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
 
 IS_PY2 = sys.version_info < (3,)
-APP_NAME = "StreamingTest"
+APP_NAME = "Tweet Stream"
 BATCH_DURATION = 1  # in seconds
 
 if not IS_PY2:
@@ -47,8 +46,19 @@ def create_context():
     return ssc
 
 
-def main():
-    pass
+def main(streaming_context):
+    kafka_stream = KafkaUtils.createStream(streaming_context,
+                                           'localhost:2181',
+                                           'raw-event-streaming-consumer',
+                                           {'twitter': 1})
+
+    parsed = kafka_stream.map(lambda k, v: json.loads(v))
+
+    # Count number of tweets in the batch
+    count_this_batch = kafka_stream.count().map(lambda x:
+                                                ('Tweets this batch: %s' % x))
+
+    return
 
 
 if __name__ == '__main__':
@@ -62,19 +72,7 @@ if __name__ == '__main__':
     ssc = StreamingContext.getOrCreate('/tmp/%s' % APP_NAME,
                                        lambda: create_context())
 
-    kafka_stream = KafkaUtils.createStream(ssc,
-                                           'localhost:2181',
-                                           'raw-event-streaming-consumer',
-                                           {'twitter': 1})
-
-    # lambda v: json.loads(v[1])
-    parsed = kafka_stream.map(lambda k, v: json.loads(v))
-
-    # Count number of tweets in the batch
-    count_this_batch = kafka_stream.count().map(lambda x:
-                                                ('Tweets this batch: %s' % x))
-
-    main()
+    main(ssc)
 
     ssc.start()
     ssc.awaitTermination(timeout=180)

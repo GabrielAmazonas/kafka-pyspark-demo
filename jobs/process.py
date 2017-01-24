@@ -24,9 +24,10 @@ APP_NAME = 'TwitterStreamKafka'
 BATCH_DURATION = 1  # in seconds
 ZK_QUORUM = 'localhost:32181'
 GROUP_ID = 'spark-streaming-consumer'
-TOPICS = {'twitter': 1}
+TOPICS = ['twitter']
 CHECKPOINT_DIRECTORY = '/tmp/%s' % APP_NAME
 STREAM_CONTEXT_TIMEOUT = 180  # seconds
+KAFKA_PARAMS = {"metadata.broker.list": 'localhost:29092'}
 
 SPARK_CONF = (SparkConf()
               .setMaster('local[2]')
@@ -58,26 +59,38 @@ def get_session(spark_conf):
 def create_context():
     spark_session = get_session(SPARK_CONF)
     ssc = StreamingContext(spark_session.sparkContext, BATCH_DURATION)
-    ssc.checkpoint(CHECKPOINT_DIRECTORY)
+    # ssc.checkpoint(CHECKPOINT_DIRECTORY)
     return ssc
+
+
+offsetRanges = []
+
+
+def storeOffsetRanges(rdd):
+    global offsetRanges
+    offsetRanges = rdd.offsetRanges()
+    return rdd
 
 
 def process(timestamp, rdd):
     print("========= %s =========" % str(timestamp))
-    # Get the singleton instance of SparkSession
-    spark = get_session(rdd.context.getConf())
+    try:
+        # Get the singleton instance of SparkSession
+        spark = get_session(rdd.context.getConf())
 
-    # Convert RDD[List[String]] to RDD[Row] to DataFrame
-    rows = rdd.flatMap(lambda w: Row(word=w))
-    words_df = spark.createDataFrame(rows)
+        # Convert RDD[List[String]] to RDD[Row] to DataFrame
+        rows = rdd.flatMap(lambda w: Row(word=w))
+        words_df = spark.createDataFrame(rows)
 
-    # Creates a temporary view using the DataFrame
-    words_df.createOrReplaceTempView('words')
+        # Creates a temporary view using the DataFrame
+        words_df.createOrReplaceTempView('words')
 
-    # Do word count on table using SQL and print it
-    sql = "SELECT word, COUNT(1) AS total FROM words GROUP BY word"
-    word_count_df = spark.sql(sql)
-    word_count_df.show()
+        # Do word count on table using SQL and print it
+        sql = "SELECT word, COUNT(1) AS total FROM words GROUP BY word"
+        word_count_df = spark.sql(sql)
+        word_count_df.show()
+    except:
+        pass
 
 
 if __name__ == '__main__':
@@ -85,8 +98,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print('Args: ', args)
 
-    ssc = StreamingContext.getOrCreate(CHECKPOINT_DIRECTORY, create_context)
-    stream = KafkaUtils.createStream(ssc, ZK_QUORUM, GROUP_ID, TOPICS)
+    # ssc = StreamingContext.getOrCreate(CHECKPOINT_DIRECTORY, create_context)
+    ssc = create_context()
+    stream = KafkaUtils.createDirectStream(ssc, TOPICS, KAFKA_PARAMS)
 
     # Count number of tweets in the batch
     # count_batch = stream.count().map(lambda x: ('Num tweets: %s' % x))

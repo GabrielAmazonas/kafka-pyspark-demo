@@ -89,7 +89,7 @@ if __name__ == '__main__':
     stream = KafkaUtils.createStream(ssc, ZK_QUORUM, GROUP_ID, TOPICS)
 
     # Count number of tweets in the batch
-    count_batch = stream.count().map(lambda x: ('Num tweets: %s' % x))
+    # count_batch = stream.count().map(lambda x: ('Num tweets: %s' % x))
 
     hashtags = (stream
                 .mapValues(json.loads)
@@ -99,3 +99,4 @@ if __name__ == '__main__':
 
     ssc.start()
     ssc.awaitTermination(timeout=STREAM_CONTEXT_TIMEOUT)
+    ssc.stop()

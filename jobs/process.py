@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Spark App.
+"""Spark Streaming Twitter.
 
 spark-submit \
   --packages org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2 \
@@ -8,97 +8,97 @@ spark-submit \
 """
 from __future__ import print_function
 
-import argparse
 import os
 import sys
+import json
+import argparse
 
+from pyspark import Row
 from pyspark.conf import SparkConf
 from pyspark.sql import SparkSession
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
 
 IS_PY2 = sys.version_info < (3,)
-APP_NAME = 'Tweet Stream'
+APP_NAME = 'TwitterStreamKafka'
 BATCH_DURATION = 1  # in seconds
-ZK_HOST = 'localhost:32181'
-TOPICS = {'twitter': 1}
+ZK_QUORUM = 'localhost:32181'
 GROUP_ID = 'spark-streaming-consumer'
+TOPICS = {'twitter': 1}
+CHECKPOINT_DIRECTORY = '/tmp/%s' % APP_NAME
+STREAM_CONTEXT_TIMEOUT = 180  # seconds
 
 if not IS_PY2:
     os.environ['PYSPARK_PYTHON'] = 'python3'
 
 
 def create_parser():
-    parser = argparse.ArgumentParser(description='ETL for play sessions.')
+    parser = argparse.ArgumentParser(description=APP_NAME)
     parser.add_argument('--input', '-i', help='input path', required=True)
     parser.add_argument('--output', '-o', help='output path', required=True)
     return parser
 
 
-# Lazily instantiated global instance of SparkSession
-def getSparkSessionInstance(sparkConf):
+def get_hashtags(tweet):
+    return ['#' + hashtag['text'] for hashtag in tweet['entities']['hashtags']]
+
+
+def get_session(spark_conf):
     if 'sparkSessionSingletonInstance' not in globals():
         globals()['sparkSessionSingletonInstance'] = (SparkSession
                                                       .builder
-                                                      .config(conf=sparkConf)
+                                                      .config(conf=spark_conf)
                                                       .enableHiveSupport()
                                                       .getOrCreate())
     return globals()['sparkSessionSingletonInstance']
 
 
-def create_context():
-    spark = (SparkSession
-             .builder
-             .master('local[2]')
-             .config('spark.jars.packages',
-                     'org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2')
-             .appName('Spark Streaming Application')
-             .enableHiveSupport()
-             .getOrCreate())
-
-    ssc = StreamingContext(spark.sparkContext, BATCH_DURATION)
-    return ssc
+def create_context(spark_session):
+    return StreamingContext(spark_session.sparkContext, BATCH_DURATION)
 
 
-def main(streaming_context):
-    kafka_stream = KafkaUtils.createStream(streaming_context,
-                                           zkQuorum=ZK_HOST,
-                                           groupId=GROUP_ID,
-                                           topics=TOPICS)
+def process(timestamp, rdd):
+    print("========= %s =========" % str(timestamp))
+    # Get the singleton instance of SparkSession
+    spark = get_session(rdd.context.getConf())
 
-    parsed = kafka_stream.map(lambda x: x[1])
+    # Convert RDD[List[String]] to RDD[Row] to DataFrame
+    rows = rdd.flatMap(lambda w: Row(word=w))
+    words_df = spark.createDataFrame(rows)
 
-    streaming_context.checkpoint('./checkpoint-tweet')
+    # Creates a temporary view using the DataFrame
+    words_df.createOrReplaceTempView('words')
 
-    running_counts = parsed.flatMap(
-        lambda line: (line.split(' ')).map(lambda word: (word, 1))
-            .updateStateByKey(updateFunc).transform(
-            lambda rdd: rdd.sortBy(lambda x: x[1], False)))
-
-    # Count number of tweets in the batch
-    count_this_batch = kafka_stream.count().map(lambda x:
-                                                ('Tweets this batch: %s' % x))
-
-    return
+    # Do word count on table using SQL and print it
+    sql = "SELECT word, COUNT(1) AS total FROM words GROUP BY word"
+    word_count_df = spark.sql(sql)
+    word_count_df.show()
 
 
 if __name__ == '__main__':
-    conf = (SparkConf()
-            .setMaster('local[2]')
-            .setAppName('Spark Streaming Application')
-            .set('spark.jars.packages',
-                 'org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2'))
-
     parser = create_parser()
-
     args = parser.parse_args()
     print('Args: ', args)
 
-    ssc = create_context()
+    conf = (SparkConf()
+            .setMaster('local[2]')
+            .setAppName(APP_NAME)
+            .set('spark.jars.packages',
+                 'org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2'))
 
-    ssc = StreamingContext.getOrCreate('/tmp/%s' % APP_NAME, create_context)
+    spark = get_session(conf)
 
-    main(ssc)
+    ssc = StreamingContext.getOrCreate(CHECKPOINT_DIRECTORY, create_context)
+    stream = KafkaUtils.createStream(ssc, ZK_QUORUM, GROUP_ID, TOPICS)
+
+    # Count number of tweets in the batch
+    count_batch = stream.count().map(lambda x: ('Num tweets: %s' % x))
+
+    hashtags = (stream
+                .map(lambda data: json.loads(data[1]))
+                .map(lambda tweet: get_hashtags(tweet)))
+
+    hashtags.foreachRDD(process)
 
     ssc.start()
-    ssc.awaitTermination(timeout=180)
+    ssc.awaitTermination(timeout=STREAM_CONTEXT_TIMEOUT)

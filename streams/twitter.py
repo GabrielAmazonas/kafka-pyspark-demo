@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function
 
-import json
 import os
 
 import tweepy
@@ -34,10 +33,9 @@ class TwitterStreamListener(tweepy.StreamListener):
         self.tweets = []
 
     def on_data(self, data):
-        tweet_dict = json.loads(data)
-        self.producer.produce('twitter', tweet_dict['text'].encode('utf-8'))
+        self.producer.produce('twitter', data.encode('utf-8'))
         self.producer.flush()
-        print(tweet_dict)
+        print(self.count)
         self.count += + 1
         return self.count <= LIMIT
 

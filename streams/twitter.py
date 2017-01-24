@@ -12,6 +12,7 @@ consumer_secret = os.environ['TWITTER_CONSUMER_SECRET']
 access_token = os.environ['TWITTER_ACCESS_TOKEN']
 access_token_secret = os.environ['TWITTER_ACCESS_TOKEN_SECRET']
 
+KAFKA_CONF = {'bootstrap.servers': 'localhost:29092'}
 LIMIT = 100
 
 
@@ -28,7 +29,7 @@ def main():
 class TwitterStreamListener(tweepy.StreamListener):
     def __init__(self):
         super(TwitterStreamListener, self).__init__()
-        self.producer = Producer({'bootstrap.servers': 'docker:9092'})
+        self.producer = Producer(**KAFKA_CONF)
         self.count = 0
         self.tweets = []
 

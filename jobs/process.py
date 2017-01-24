@@ -3,7 +3,7 @@
 """Spark Streaming Twitter.
 
 spark-submit \
-  --packages org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2 \
+  --packages org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2
 
 """
 from __future__ import print_function
@@ -28,19 +28,21 @@ TOPICS = {'twitter': 1}
 CHECKPOINT_DIRECTORY = '/tmp/%s' % APP_NAME
 STREAM_CONTEXT_TIMEOUT = 180  # seconds
 
+SPARK_CONF = (SparkConf()
+              .setMaster('local[2]')
+              .setAppName(APP_NAME))
+
 if not IS_PY2:
     os.environ['PYSPARK_PYTHON'] = 'python3'
 
 
 def create_parser():
     parser = argparse.ArgumentParser(description=APP_NAME)
-    parser.add_argument('--input', '-i', help='input path', required=True)
-    parser.add_argument('--output', '-o', help='output path', required=True)
     return parser
 
 
 def get_hashtags(tweet):
-    return ['#' + hashtag['text'] for hashtag in tweet['entities']['hashtags']]
+    return [hashtag['text'] for hashtag in tweet['entities']['hashtags']]
 
 
 def get_session(spark_conf):
@@ -53,8 +55,11 @@ def get_session(spark_conf):
     return globals()['sparkSessionSingletonInstance']
 
 
-def create_context(spark_session):
-    return StreamingContext(spark_session.sparkContext, BATCH_DURATION)
+def create_context():
+    spark_session = get_session(SPARK_CONF)
+    ssc = StreamingContext(spark_session.sparkContext, BATCH_DURATION)
+    ssc.checkpoint(CHECKPOINT_DIRECTORY)
+    return ssc
 
 
 def process(timestamp, rdd):
@@ -80,14 +85,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print('Args: ', args)
 
-    conf = (SparkConf()
-            .setMaster('local[2]')
-            .setAppName(APP_NAME)
-            .set('spark.jars.packages',
-                 'org.apache.spark:spark-streaming-kafka-0-8_2.11:2.0.2'))
-
-    spark = get_session(conf)
-
     ssc = StreamingContext.getOrCreate(CHECKPOINT_DIRECTORY, create_context)
     stream = KafkaUtils.createStream(ssc, ZK_QUORUM, GROUP_ID, TOPICS)
 
@@ -95,8 +92,8 @@ if __name__ == '__main__':
     count_batch = stream.count().map(lambda x: ('Num tweets: %s' % x))
 
     hashtags = (stream
-                .map(lambda data: json.loads(data[1]))
-                .map(lambda tweet: get_hashtags(tweet)))
+                .mapValues(json.loads)
+                .map(get_hashtags))
 
     hashtags.foreachRDD(process)
 

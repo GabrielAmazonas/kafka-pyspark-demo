@@ -1,7 +1,11 @@
+FROM python:3
 
 MAINTAINER <kysindi@gmail.com>
 
-ENV IP='0.0.0.0'
+RUN apt install librdkafka-dev
+RUN pip install tweepy confluent-kafka
 
+COPY twitter.py /
 COPY ./docker-entrypoint.sh /
+
 ENTRYPOINT ["/docker-entrypoint.sh"]

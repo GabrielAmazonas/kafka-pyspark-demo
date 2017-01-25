@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+"""Stream tweets via Twitter API tracking keywords."""
 from __future__ import print_function
 
 import os
@@ -12,6 +13,8 @@ access_token = os.environ['TWITTER_ACCESS_TOKEN']
 access_token_secret = os.environ['TWITTER_ACCESS_TOKEN_SECRET']
 
 KAFKA_CONF = {'bootstrap.servers': 'localhost:29092'}
+TOPIC = 'twitter'
+TRACKS = ['python']
 LIMIT = 100
 
 
@@ -22,7 +25,7 @@ def main():
 
     listener = TwitterStreamListener()
     twitter_stream = tweepy.Stream(auth=api.auth, listener=listener)
-    twitter_stream.filter(track=['python'], languages=['en'], async=True)
+    twitter_stream.filter(track=TRACKS, languages=['en'], async=True)
 
 
 class TwitterStreamListener(tweepy.StreamListener):
@@ -33,14 +36,14 @@ class TwitterStreamListener(tweepy.StreamListener):
         self.tweets = []
 
     def on_data(self, data):
-        self.producer.produce('twitter', data.encode('utf-8'))
+        self.producer.produce(TOPIC, data.encode('utf-8'))
         self.producer.flush()
-        print(self.count)
+        print('Tweet count: ', self.count)
         self.count += + 1
         return self.count <= LIMIT
 
     def on_error(self, status_code):
-        if status_code == 420:
+        if status_code == 420:  # rate limit
             return False
 
 

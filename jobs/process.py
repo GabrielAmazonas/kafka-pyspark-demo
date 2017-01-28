@@ -17,7 +17,7 @@ from pyspark import Row
 from pyspark.conf import SparkConf
 from pyspark.sql import SparkSession
 from pyspark.streaming import StreamingContext
-from pyspark.streaming.kafka import KafkaUtils
+from pyspark.streaming.kafka import KafkaUtils, TopicAndPartition
 
 IS_PY2 = sys.version_info < (3,)
 APP_NAME = 'TwitterStreamKafka'
@@ -26,12 +26,10 @@ ZK_QUORUM = 'localhost:32181'
 GROUP_ID = 'spark-streaming-consumer'
 TOPICS = ['twitter']
 CHECKPOINT_DIRECTORY = '/tmp/%s' % APP_NAME
-STREAM_CONTEXT_TIMEOUT = 180  # seconds
+STREAM_CONTEXT_TIMEOUT = 20  # seconds
 KAFKA_PARAMS = {"metadata.broker.list": 'localhost:29092'}
 
-SPARK_CONF = (SparkConf()
-              .setMaster('local[2]')
-              .setAppName(APP_NAME))
+offsetRanges = []
 
 if not IS_PY2:
     os.environ['PYSPARK_PYTHON'] = 'python3'
@@ -40,10 +38,6 @@ if not IS_PY2:
 def create_parser():
     parser = argparse.ArgumentParser(description=APP_NAME)
     return parser
-
-
-def get_hashtags(tweet):
-    return [hashtag['text'] for hashtag in tweet['entities']['hashtags']]
 
 
 def get_session(spark_conf):
@@ -56,20 +50,29 @@ def get_session(spark_conf):
     return globals()['sparkSessionSingletonInstance']
 
 
-def create_context():
-    spark_session = get_session(SPARK_CONF)
+def create_context(spark_conf):
+    spark_session = get_session(spark_conf)
     ssc = StreamingContext(spark_session.sparkContext, BATCH_DURATION)
-    # ssc.checkpoint(CHECKPOINT_DIRECTORY)
+    ssc.checkpoint(CHECKPOINT_DIRECTORY)
     return ssc
-
-
-offsetRanges = []
 
 
 def storeOffsetRanges(rdd):
     global offsetRanges
     offsetRanges = rdd.offsetRanges()
     return rdd
+
+
+def printOffsetRanges(rdd):
+    for o in offsetRanges:
+        print("========= Offset Start =========")
+        print("%s %s %s %s" % (o.topic, o.partition, o.fromOffset,
+                               o.untilOffset))
+        print("========= Offset End =========")
+
+
+def get_hashtags(tweet):
+    return [hashtag['text'] for hashtag in tweet['entities']['hashtags']]
 
 
 def process(timestamp, rdd):
@@ -79,7 +82,12 @@ def process(timestamp, rdd):
         spark = get_session(rdd.context.getConf())
 
         # Convert RDD[List[String]] to RDD[Row] to DataFrame
-        rows = rdd.flatMap(lambda w: Row(word=w))
+        rows = rdd.flatMap(lambda a: a).map(lambda w: Row(word=w))
+
+        print("========== Rows Start ===============")
+        rows.foreach(print)
+        print("========== Rows End ===============")
+
         words_df = spark.createDataFrame(rows)
 
         # Creates a temporary view using the DataFrame
@@ -88,7 +96,9 @@ def process(timestamp, rdd):
         # Do word count on table using SQL and print it
         sql = "SELECT word, COUNT(1) AS total FROM words GROUP BY word"
         word_count_df = spark.sql(sql)
+        print("========== Show Start ===============")
         word_count_df.show()
+        print("========== Show End ===============")
     except:
         pass
 
@@ -98,15 +108,39 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print('Args: ', args)
 
+    SPARK_CONF = (SparkConf()
+                  .setMaster('local[2]')
+                  .setAppName(APP_NAME))
+
     # ssc = StreamingContext.getOrCreate(CHECKPOINT_DIRECTORY, create_context)
-    ssc = create_context()
+    ssc = create_context(SPARK_CONF)
+
+    # start offsets from beginning
+    offsets = {TopicAndPartition(topic, 0): 0 for topic in TOPICS}
     stream = KafkaUtils.createDirectStream(ssc, TOPICS, KAFKA_PARAMS)
 
     # Count number of tweets in the batch
-    # count_batch = stream.count().map(lambda x: ('Num tweets: %s' % x))
+    print("============ Count Start =========")
+    count_batch = (stream
+                   .count()
+                   .map(lambda x: ('Num tweets: %s' % x)))
+
+    # Count by windowed time period
+    count_windowed = (stream
+                      .countByWindow(60, 5)
+                      .map(
+        lambda x: ('Tweets total (One minute rolling count): %s' % x)))
+
+    count_batch.pprint()
+
+    print("============ Count End =========")
+
+    (stream
+     .transform(storeOffsetRanges)
+     .foreachRDD(printOffsetRanges))
 
     hashtags = (stream
-                .mapValues(json.loads)
+                .map(lambda x: json.loads(x[1]))
                 .map(get_hashtags))
 
     hashtags.foreachRDD(process)

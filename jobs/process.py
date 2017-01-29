@@ -30,6 +30,9 @@ TOPICS = ['twitter']
 CHECKPOINT = '/tmp/%s' % APP_NAME
 STREAM_CONTEXT_TIMEOUT = 60  # seconds
 KAFKA_PARAMS = {"metadata.broker.list": 'localhost:29092'}
+SPARK_CONF = (SparkConf()
+              .setMaster('local[2]')
+              .setAppName(APP_NAME))
 
 offsetRanges = []
 
@@ -84,7 +87,6 @@ def get_hashtags(tweet):
 
 
 def process(timestamp, rdd):
-    print("=========== %s ==========".format(timestamp))
     try:
         # Get the singleton instance of SparkSession
         spark = get_session(rdd.context.getConf())
@@ -100,7 +102,6 @@ def process(timestamp, rdd):
         # Do word count on table using SQL and print it
         sql = "SELECT word, COUNT(1) AS total FROM words GROUP BY word"
         word_count_df = spark.sql(sql)
-        print("============ SHOW ===============")
         word_count_df.show()
     except:
         pass
@@ -110,12 +111,14 @@ def main(stream):
     tweets = stream.map(lambda x: json.loads(x[1]))
 
     # list the most common works using a running count
-    running_count = (tweets
-                     .flatMap(lambda tweet: tweet['text'].split(' '))
-                     .countByValue()
-                     .updateStateByKey(updateFunc)
-                     .transform(lambda rdd: rdd.sortBy(lambda x: x[1], ascending=False))
-                     .map(lambda x: "%s (%s)" % x))
+    running_count = (
+        tweets
+            .flatMap(lambda tweet: tweet['text'].split(' '))
+            .countByValue()
+            .updateStateByKey(updateFunc)
+            .transform(
+            lambda rdd: rdd.sortBy(lambda x: x[1], ascending=False))
+            .map(lambda x: "%s (%s)" % x))
 
     running_count.pprint()
 
@@ -150,9 +153,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print('Args: ', args)
 
-    SPARK_CONF = (SparkConf()
-                  .setMaster('local[2]')
-                  .setAppName(APP_NAME))
     spark = get_session(SPARK_CONF)
     spark.sparkContext.setLogLevel('WARN')  # suppress spark logging
 

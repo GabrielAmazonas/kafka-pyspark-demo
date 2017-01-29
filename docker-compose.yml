@@ -25,4 +25,4 @@ services:
     links:
      - kafka
     ports:
-      - "8888:8888"
+      - "18888:8888"

@@ -60,6 +60,7 @@ def create_context():
     ssc = StreamingContext(spark.sparkContext, BATCH_DURATION)
     ssc.checkpoint(CHECKPOINT)
     # start offsets from beginning
+    # won't work if we have a chackpoint
     offsets = {TopicAndPartition(topic, 0): 0 for topic in TOPICS}
     stream = KafkaUtils.createDirectStream(ssc, TOPICS, KAFKA_PARAMS, offsets)
     main(stream)
@@ -111,44 +112,43 @@ def main(stream):
     tweets = stream.map(lambda x: json.loads(x[1]))
 
     # list the most common works using a running count
-    running_count = (
-        tweets
-            .flatMap(lambda tweet: tweet['text'].split(' '))
-            .countByValue()
-            .updateStateByKey(updateFunc)
-            .transform(
-            lambda rdd: rdd.sortBy(lambda x: x[1], ascending=False))
-            .map(lambda x: "%s (%s)" % x))
+    running_count = (tweets
+                     .flatMap(lambda tweet: tweet['text'].split(' '))
+                     .countByValue()
+                     .updateStateByKey(updateFunc)
+                     .transform(lambda rdd: rdd.sortBy(lambda x: x[1], False))
+                     .map(lambda x: "%s (%s)" % x))
 
     running_count.pprint()
 
     # Count number of tweets in the batch
-    count_batch = (stream
+    count_batch = (tweets
+                   .window(windowDuration=60, slideDuration=5)
                    .count()
                    .map(lambda x: ('Num tweets: %s' % x)))
 
     # Count by windowed time period
-    count_windowed = (stream
+    count_windowed = (tweets
                       .countByWindow(windowDuration=60, slideDuration=5)
                       .map(lambda x: ('Tweets total (1-min rolling): %s' % x)))
 
     # Get authors
     authors = tweets.map(lambda tweet: tweet['user']['screen_name'])
 
-    count_batch.pprint()
-    count_windowed.pprint()
+    count_batch.union(count_windowed).pprint()
 
     (stream
      .transform(storeOffsetRanges)
      .foreachRDD(printOffsetRanges))
 
-    (stream
-     .map(lambda x: json.loads(x[1]))
+    (tweets
      .map(get_hashtags)
      .foreachRDD(process))
 
 
 if __name__ == '__main__':
+    import shutil; shutil.rmtree(CHECKPOINT)  # delete any checkpoints
+
     parser = create_parser()
     args = parser.parse_args()
     print('Args: ', args)

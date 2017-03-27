@@ -1,4 +1,4 @@
-# kafka-pyspark
+# Kafka PySpark Demo
 
 Demo of Python Spark Streaming and Kafka
 

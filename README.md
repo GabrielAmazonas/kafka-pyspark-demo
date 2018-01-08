@@ -30,11 +30,13 @@ docker run \
   kafka-topics --create --topic twitter --partitions 1 --replication-factor 1 \
     --if-not-exists --zookeeper localhost:32181
 
+# Describe topic
 docker run \
   --net=host \
   --rm confluentinc/cp-kafka:3.1.1 \
   kafka-topics --describe --topic twitter --zookeeper localhost:32181
 
+# Create consumer that reads from beginning
 docker run \
   --net=host \
   --rm \
